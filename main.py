@@ -28,8 +28,8 @@ class PixelLoss(nn.Module):
 
         # Hyperparameter to tune penalty for intermediate transparency values
         penalty_weight = args.alpha_penalty
-        total_loss = base_loss + penalty_weight * alpha_penalty
 
+        total_loss = base_loss + penalty_weight * alpha_penalty
         return total_loss
 
 class NNDownscale(nn.Module):
@@ -174,7 +174,7 @@ def use_inference(model_path, input_image_path, output_image_path):
     
      # Check if the image has an alpha channel
     if 'A' not in input_image.getbands():
-        print("No alpha channel detected. Temporarily adding empty alpha channel.")
+        print("No alpha channel detected in input image. Temporarily adding empty alpha channel.")
         input_image = ImageOps.exif_transpose(input_image.convert("RGBA"))
     
     model = NNDownscale()
@@ -204,7 +204,7 @@ def use_inference(model_path, input_image_path, output_image_path):
     output_image = Image.fromarray(output_tensor.cpu().permute(1, 2, 0).numpy(), 'RGBA')
     output_image.save(unique_output_path)
 
-    print(f"Output image saved at {unique_output_path}")
+    print(f"Output image saved to {unique_output_path}")
 
 def get_device():
     if args.cpu:
@@ -218,14 +218,6 @@ def get_device():
             print("CUDA not available, falling back to CPU.")
             return torch.device("cpu")
 
-def main(args):
-    if args.train:
-        train_model(args.data, args.epochs)
-    elif args.infer:
-        use_inference(args.model_path, args.input_image, args.output_image)
-    else:
-        print("Invalid choice. Exiting.")
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pixel Art CNN: Restore pixel art to pixel perfection.")
 
@@ -234,17 +226,18 @@ if __name__ == "__main__":
     parser.add_argument('--infer', action='store_true', help='Use model to clean pixel art')
     parser.add_argument('--epochs', type=int, default=150, help='Number of epochs for training. Default: 150')
     parser.add_argument('--learning_rate', type=float, default=0.004, help='Learning rate for training. Default: 0.004')
-    parser.add_argument('--alpha_penalty', type=float, default=0.8, help='Discourages transparency values that are not either 0 or 255 during training. Increases sharp edges, but may corrupt output. Default: 0.8')
+    parser.add_argument('--alpha_penalty', type=float, default=0.8, help='Discourages transparency values that are neither 0 nor 255 during training. Increases sharp edges, but may corrupt output. Default: 0.8')
     parser.add_argument('--model_path', type=str, default='model.pth', help='Path to the trained model, or path to save the model')
     parser.add_argument('--input_image', type=str, default='', help='Path to the input image for inference')
-    parser.add_argument('--output_image', type=str, default='', help='Path to save the output image')
+    parser.add_argument('--output_image', type=str, default='', help='Path to save the output image for inference')
     parser.add_argument('--cpu', action='store_true', help='Use CPU instead of GPU')
     
     args = parser.parse_args()
 
     if args.train:
-        train_model(args.data, args.epochs, args.model_path)
+        train_model(args.data, args.epochs)
     elif args.infer:
         use_inference(args.model_path, args.input_image, args.output_image)
     else:
-        print("Invalid choice. Exiting.")
+        print("Error: You must use --train or --infer options.\nExiting...")
+        exit(1)
