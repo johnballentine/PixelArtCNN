@@ -1,8 +1,6 @@
 import argparse
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
@@ -176,7 +174,7 @@ def use_inference(model_path, input_image_path, output_image_path):
     
      # Check if the image has an alpha channel
     if 'A' not in input_image.getbands():
-        print("Adding alpha channel.")
+        print("No alpha channel detected. Temporarily adding empty alpha channel.")
         input_image = ImageOps.exif_transpose(input_image.convert("RGBA"))
     
     model = NNDownscale()
@@ -214,6 +212,7 @@ def get_device():
         return torch.device("cpu")
     else:
         if torch.cuda.is_available():
+            print(f"Using GPU: {torch.cuda.get_device_name(0)}")
             return torch.device("cuda:0")
         else:
             print("CUDA not available, falling back to CPU.")
@@ -232,11 +231,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--data', type=str, default='', help='Directory containing training data. Images must be appended with _input.png or _label.png')
     parser.add_argument('--train', action='store_true', help='Train the model')
-    parser.add_argument('--infer', action='store_true', help='Use model to clean pixel art.')
-    parser.add_argument('--epochs', type=int, default=150, help='Number of epochs for training.')
-    parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for training. Default: 0.005')
+    parser.add_argument('--infer', action='store_true', help='Use model to clean pixel art')
+    parser.add_argument('--epochs', type=int, default=150, help='Number of epochs for training. Default: 150')
+    parser.add_argument('--learning_rate', type=float, default=0.004, help='Learning rate for training. Default: 0.004')
     parser.add_argument('--alpha_penalty', type=float, default=0.8, help='Discourages transparency values that are not either 0 or 255 during training. Increases sharp edges, but may corrupt output. Default: 0.8')
-    parser.add_argument('--model_path', type=str, default='model.pth', help='Path to the trained model, or path to save the model.')
+    parser.add_argument('--model_path', type=str, default='model.pth', help='Path to the trained model, or path to save the model')
     parser.add_argument('--input_image', type=str, default='', help='Path to the input image for inference')
     parser.add_argument('--output_image', type=str, default='', help='Path to save the output image')
     parser.add_argument('--cpu', action='store_true', help='Use CPU instead of GPU')
