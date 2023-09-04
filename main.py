@@ -19,7 +19,6 @@ class PixelLoss(nn.Module):
         self.mse = nn.MSELoss()
 
     def forward(self, pred, target):
-        # Basic MSE loss
         base_loss = self.mse(pred, target)
 
         # Extract the alpha channel from the predictions
@@ -27,14 +26,10 @@ class PixelLoss(nn.Module):
 
         # Create a mask for alpha values that are neither 0 nor 1
         mask = (pred_alpha > 0) & (pred_alpha < 1)
-
-        # Calculate the penalty term
         alpha_penalty = torch.sum(mask.float())
 
         # Hyperparameter to tune penalty for intermediate transparency values
         penalty_weight = args.alpha_penalty
-
-        # Combine the base loss and the penalty
         total_loss = base_loss + penalty_weight * alpha_penalty
 
         return total_loss
@@ -43,25 +38,24 @@ class NNDownscale(nn.Module):
     def __init__(self):
         super(NNDownscale, self).__init__()
         
-        # Input shape: [batch, 4, 256, 256] (RGBA channels)
         self.encoder = nn.Sequential(
-            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),  # Output shape: [batch, 64, 256, 256]
+            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Output shape: [batch, 64, 128, 128]
+            nn.MaxPool2d(2, 2),
             
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),  # Output shape: [batch, 128, 128, 128]
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Output shape: [batch, 128, 64, 64]
+            nn.MaxPool2d(2, 2),
             
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),  # Output shape: [batch, 256, 64, 64]
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Output shape: [batch, 256, 32, 32]
+            nn.MaxPool2d(2, 2),
             
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),  # Output shape: [batch, 512, 32, 32]
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Output shape: [batch, 512, 16, 16]
+            nn.MaxPool2d(2, 2),
             
-            nn.Conv2d(512, 4, kernel_size=1, stride=1, padding=0),  # Output shape: [batch, 4, 16, 16] (RGBA channels)
+            nn.Conv2d(512, 4, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid()
         )
         
@@ -71,16 +65,17 @@ class NNDownscale(nn.Module):
     
 
 def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
-    print(f"Training model from directory: \033[36m{directory}\033[0m")  # Debug print
+    device = get_device()
+
+    print(f"Training model from directory: \033[36m{directory}\033[0m")
     transform = transforms.ToTensor()
     label_files = sorted(glob.glob(os.path.join(directory, '*_label.png')))
     input_files = sorted(glob.glob(os.path.join(directory, '*_input.png')))
     
-    # Initialize lists to hold label and input data
     labels = []
     input = []
     
-    # Check properties for label images
+    # Validate label images
     for f in label_files:
         img = Image.open(f)
         if img.size != (16, 16):
@@ -91,7 +86,7 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
             return
         labels.append(transform(img))
     
-    # Check properties for input images
+    # Validate input images
     for f in input_files:
         img = Image.open(f)
         if img.size != (256, 256):
@@ -103,22 +98,13 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
             img = ImageOps.exif_transpose(img.convert("RGBA"))
         input.append(transform(img))
 
-    # Convert lists to torch tensors
     labels = torch.stack(labels)
     input = torch.stack(input)
     
-    print("Creating DataLoader.")
     dataset = TensorDataset(input, labels)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     print("Initializing loss and optimizer.")
-
-    if args.cpu != True:
-        # Set the device to GPU if available, otherwise, CPU
-        device = torch.device("cuda:0" if torch.cuda.is_available() and not args.cpu else "cpu")
-        print(f"Using GPU: {device}")
-    else: 
-        print("Using CPU")
 
     model = NNDownscale().to(device)
     criterion = PixelLoss()
@@ -144,7 +130,6 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
             epoch_loss += loss.item()  # Accumulate batch loss into epoch loss
             loss.backward()
 
-            # Clip gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
             optimizer.step()
@@ -167,22 +152,21 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
             print(f"\033[93mLoss:\033[0m {loss.item()}")
             print("----")
 
-        avg_epoch_loss = epoch_loss / len(dataloader)  # Calculate average epoch loss
-        scheduler.step(avg_epoch_loss)  # Step the scheduler based on the average epoch loss
+        avg_epoch_loss = epoch_loss / len(dataloader)
+        scheduler.step(avg_epoch_loss)
 
         # Save the model to temp after epoch to enable early stopping with lower risk of corruption
         torch.save(model.state_dict(), temp_model_save_path)
         os.rename(temp_model_save_path, model_save_path)
 
-        # Copy the model file at every 10th epoch with a special name
+        # Copy the model file at every 20th epoch
         if (epoch + 1) % 20 == 0:
             filename_without_extension, _ = os.path.splitext(model_save_path)
             special_model_save_path = f"{filename_without_extension}_epoch{epoch+1}.pth"
             shutil.copy(model_save_path, special_model_save_path)
 
 def use_inference(model_path, input_image_path, output_image_path):
-    print("Starting inference.")
-
+    device = get_device()
     input_image = Image.open(input_image_path)
 
     # Check if the image is 256x256
@@ -194,22 +178,15 @@ def use_inference(model_path, input_image_path, output_image_path):
     if 'A' not in input_image.getbands():
         print("Adding alpha channel.")
         input_image = ImageOps.exif_transpose(input_image.convert("RGBA"))
-
-    channels = len(input_image.getbands())
     
     model = NNDownscale()
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
     model.eval()
     
     transform = transforms.ToTensor()
     input_tensor = transform(input_image).unsqueeze(0)
-
-    if args.cpu != True:
-        # Set the device to GPU if available, otherwise, CPU
-        device = torch.device("cuda:0" if torch.cuda.is_available() and not args.cpu else "cpu")
-        print(f"Using GPU: {device}")
-    else: 
-        print("Using CPU")
+    input_tensor = input_tensor.to(device)
     
     with torch.no_grad():
         output_tensor = model(input_tensor)
@@ -226,13 +203,23 @@ def use_inference(model_path, input_image_path, output_image_path):
     output_tensor = (output_tensor.squeeze() * 255).byte()
 
     # Convert to PIL Image
-    output_image = Image.fromarray(output_tensor.permute(1, 2, 0).numpy(), 'RGBA')
+    output_image = Image.fromarray(output_tensor.cpu().permute(1, 2, 0).numpy(), 'RGBA')
     output_image.save(unique_output_path)
 
     print(f"Output image saved at {unique_output_path}")
 
+def get_device():
+    if args.cpu:
+        print("Using CPU.")
+        return torch.device("cpu")
+    else:
+        if torch.cuda.is_available():
+            return torch.device("cuda:0")
+        else:
+            print("CUDA not available, falling back to CPU.")
+            return torch.device("cpu")
+
 def main(args):
-    print("Parsing arguments.")  # Debug print
     if args.train:
         train_model(args.data, args.epochs)
     elif args.infer:
@@ -254,7 +241,6 @@ if __name__ == "__main__":
     parser.add_argument('--output_image', type=str, default='', help='Path to save the output image')
     parser.add_argument('--cpu', action='store_true', help='Use CPU instead of GPU')
     
-    
     args = parser.parse_args()
 
     if args.train:
@@ -263,4 +249,3 @@ if __name__ == "__main__":
         use_inference(args.model_path, args.input_image, args.output_image)
     else:
         print("Invalid choice. Exiting.")
-
