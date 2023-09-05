@@ -1,7 +1,14 @@
+tempscript.py
+
 *.png
 *.jpeg
 *.jpg
 *.pth
+
+# Don't ignore images in the images folder
+!images/*.png
+!images/*.jpeg
+!images/*.jpg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

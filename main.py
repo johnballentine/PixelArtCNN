@@ -37,15 +37,7 @@ class NNDownscale(nn.Module):
         super(NNDownscale, self).__init__()
         
         self.encoder = nn.Sequential(
-            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(4, 256, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2, 2),
             
@@ -53,7 +45,15 @@ class NNDownscale(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(2, 2),
             
-            nn.Conv2d(512, 4, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            
+            nn.Conv2d(1024, 2048, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            
+            nn.Conv2d(2048, 4, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid()
         )
         
@@ -61,8 +61,37 @@ class NNDownscale(nn.Module):
         x = self.encoder(x)
         return x
     
+def count_parameters(model, human_readable=False):
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
+    if human_readable:
+        suffixes = ['K', 'M', 'B', 'T']
+        i = 0
+        while total_params >= 1000 and i < len(suffixes):
+            total_params /= 1000.0
+            i += 1
+        return "{:.3f}{}".format(total_params, suffixes[i-1]) if i else "{:.0f}".format(total_params)
+    else:
+        return total_params
+    
+def estimate_model_size(parameter_count, human_readable=True):
+    # Each parameter is 4 bytes (32 bits)
+    total_bytes = parameter_count * 4
+    
+    # Convert to megabytes
+    total_megabytes = total_bytes / (1024 ** 2)
+
+    if human_readable:
+        suffixes = ['MB', 'GB', 'TB']
+        i = 0
+        while total_megabytes >= 1024 and i < len(suffixes):
+            total_megabytes /= 1024.0
+            i += 1
+        return "{:.3f} {}".format(total_megabytes, suffixes[i]) if i else "{:.3f} MB".format(total_megabytes)
+    else:
+        return total_megabytes
+    
+def train_model(directory, epochs, model_save_path="model.pth", batch_size=32):
     device = get_device()
 
     print(f"Training model from directory: \033[36m{directory}\033[0m")
@@ -106,12 +135,17 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
 
     model = NNDownscale().to(device)
     criterion = PixelLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-4, betas=(0.9, 0.999))
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=1e-5, betas=(0.9, 0.999))
     scheduler = ReduceLROnPlateau(optimizer, 'min', patience=10)
 
     print("----")
     print("\033[92mTraining started.\033[0m")
+    total_params = count_parameters(model, human_readable=True)
+    print(f'\033[34mTotal number of parameters:\033[0m {total_params}')
+    model_size = estimate_model_size(count_parameters(model), human_readable=True)
+    print(f'\033[35mEstimated model size:\033[0m {model_size}')
     print("----")
+
     temp_model_save_path = f"{model_save_path}_temp.pth"
     for epoch in range(epochs):
         epoch_loss = 0.0  # Initialize epoch_loss to accumulate loss over the epoch
@@ -131,6 +165,12 @@ def train_model(directory, epochs, model_save_path="model.pth", batch_size=16):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
             optimizer.step()
+
+            # Print gradients for debugging
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    print(name, param.grad.data)
+
             print(f"\033[34mEpoch:\033[0m {epoch+1}/{epochs}, \033[34mBatch:\033[0m {batch_idx+1}/{len(dataloader)}")
 
             # Print the mean, median, min, and max for all channels
@@ -224,9 +264,9 @@ if __name__ == "__main__":
     parser.add_argument('--data', type=str, default='', help='Directory containing training data. Images must be appended with _input.png or _label.png')
     parser.add_argument('--train', action='store_true', help='Train the model')
     parser.add_argument('--infer', action='store_true', help='Use model to clean pixel art')
-    parser.add_argument('--epochs', type=int, default=150, help='Number of epochs for training. Default: 150')
-    parser.add_argument('--learning_rate', type=float, default=0.004, help='Learning rate for training. Default: 0.004')
-    parser.add_argument('--alpha_penalty', type=float, default=0.8, help='Discourages transparency values that are neither 0 nor 255 during training. Increases sharp edges, but may corrupt output. Default: 0.8')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs for training. Default: 100')
+    parser.add_argument('--learning_rate', type=float, default=0.0005, help='Learning rate for training. Default: 0.0005')
+    parser.add_argument('--alpha_penalty', type=float, default=0.4, help='Discourages transparency values that are neither 0 nor 255 during training. Increases sharp edges, but may corrupt output. Default: 0.4')
     parser.add_argument('--model_path', type=str, default='model.pth', help='Path to the trained model, or path to save the model')
     parser.add_argument('--input_image', type=str, default='', help='Path to the input image for inference')
     parser.add_argument('--output_image', type=str, default='', help='Path to save the output image for inference')
